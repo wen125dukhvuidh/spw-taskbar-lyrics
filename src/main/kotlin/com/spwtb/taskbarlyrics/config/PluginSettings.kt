@@ -354,7 +354,7 @@ class PluginSettings private constructor(private val manager: ConfigManager) {
             }
             if (System.currentTimeMillis() - mtime < freshWriteGuardMs) {
                 // 可能正在写。把旧时间戳放回去，下一轮再判断
-                if (last != null) lastStamps[helper] = last
+                lastStamps[helper] = last
                 continue
             }
             if (helper.reload()) {

@@ -54,13 +54,13 @@ class PluginSettingsBoldReloadTest {
     ) : ConfigManager {
         override fun getConfig(): ConfigHelper = helpers.values.first()
 
-        override fun getConfig(name: String): ConfigHelper =
-            helpers[name] ?: error("未注册的配置：$name")
+        override fun getConfig(fileName: String): ConfigHelper =
+            helpers[fileName] ?: error("未注册的配置：$fileName")
 
         override fun addConfigChangeListener(listener: Consumer<ConfigHelper>) = Unit
 
         override fun addConfigChangeListener(
-            name: String,
+            fileName: String,
             listener: Consumer<ConfigHelper>
         ) = Unit
 

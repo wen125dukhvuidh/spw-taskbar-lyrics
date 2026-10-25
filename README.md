@@ -48,7 +48,7 @@ Salt Player for Windows 进程（Java 25，jlink 裁剪运行时）
 | 插件内任务栏渲染可行性验证 | ✅ 分层窗口可嵌入任务栏、真实像素回读成功 |
 | 歌词采集（内嵌解析 + 封面提取） | ✅ |
 | 配置界面（五组，参考 TaskbarLyrics 的设置体系） | ✅ |
-| **编译打包** | ✅ 产出约 628 KB 的插件包（JNA 只带 Windows 原生库） |
+| **编译打包** | ✅ 产出约 2.1 MB 的插件包（官方 Workshop 打包，JNA 完整） |
 | **渲染栈端到端自检**（宿主的 18 个模块 + 插件真实类） | ✅ 333 帧无异常 |
 | **文字渲染按原版源码逐项对齐**（透明度 / 扫描叠加 / 阴影 / 版式） | ✅ 与源码公式一致 |
 | **字重与 Chromium 对齐**（字体按文件加载 + gamma 补偿） | ✅ 墨量/笔画差 <1% |
@@ -65,7 +65,7 @@ Salt Player for Windows 进程（Java 25，jlink 裁剪运行时）
 | 装机实测（SPW 里真实播放） | ✅ SPW 1.19.2：导入/启用/播放；加粗热更新已确认 |
 | 多显示器 | ⬜ 暂只处理主任务栏 |
 
-## 1.4.15 变更
+## 1.5.0 变更
 
 - **封面管线**：原图按歌曲缓存、尺寸/圆角按参数缓存；换歌时同步解码一次，封面与歌词同帧切换（与 1.4.10 一致）；拖动「封面尺寸 / 圆角 / 整体缩放」只是从内存原图缩放，不再重读音频文件、重新解码。
 - **暂停恢复**：恢复播放时刷新位置外推的时间戳，避免歌词先跳 2 秒再被拽回来。
@@ -74,36 +74,38 @@ Salt Player for Windows 进程（Java 25，jlink 裁剪运行时）
 - **内存与线程**：歌词缓存 32 首 → 8 首；停用插件时关掉解析线程与封面解码线程。
 - **唤醒**：帧等待改用唤醒计数，帧边界到达的唤醒不再丢失。
 - **帧推送**：ARGB→BGRA 改为按 int 写入，JNA 结构体复用。
-- **包体**：JNA 只保留 Windows 原生库，2.18 MB → 628 KB。
+- **包体**：官方 Workshop 插件打包完整 JNA，约 2.1 MB；1.4.16 的 Windows-only 裁剪已停用（可另行恢复）。
 - **单测**：新增 LRC 解析 / 选行 / 逐字进度 / 粗体渲染 / 粗体热更新的单元测试。
+- **首曲歌词/封面**：Steam 订阅后首次启动，插件可能在首曲的 `onBeforeLoadLyrics` 之后才注册；现在接住 SPW 1.19 的 `onLyricsLinesUpdated` 重放，并在获授权后用 `getCurrentMediaItem` 拿回首曲的真实路径（封面/内嵌歌词）。未授权时仍用临时会话显示歌词，只是没有封面。
+- **迁移与权限**：构建迁到官方 dev22 / JDK 25 / Gradle 9.8.0 / 官方 Workshop Gradle 插件；只申请 `LIBRARY_READ`（曲库读取）。首次启用/更新时播放器会请求授权。
 - **加粗即时生效**：两处根因都修了——① 宿主给插件侧的 `ConfigHelper` 运行期不刷新嵌套值，`bold` 改为直接读 `typography.json`；② `registerFont` 只注册当前字面，启动时粗体会让家族表缺常规面，字体解析改为每个候选名字先按文件取精确字重、再退回家族表。现在两个方向都能即时切换（已真机确认）。
 
-> 状态：编译通过、单元测试通过、分发包结构校验通过；JNA 裁剪版已在真机成功加载 `user32` 并枚举到任务栏。
-> 已在 SPW 1.19.2 上实际播放验证（加粗热更新已确认）；发布前其余设置项建议按自检清单过一遍。
+> 状态：编译通过、单元测试通过；1.5.0 分发包由官方 Workshop Gradle 插件生成，Manifest 含 `Plugin-Permissions: library-read`。
+> 已在 SPW 1.19.2 上实际播放验证（加粗、首曲歌词/封面；`LIBRARY_READ` 已授权），其余设置项建议按自检清单过一遍。
 
 ## 构建
 
 ```powershell
-$env:JAVA_HOME = "你的 JDK 21 路径"
+$env:JAVA_HOME = "你的 JDK 25 路径"
 .\gradlew.bat plugin
 ```
 
-产物：`build/libs/plugin-com.spwtb.spw-taskbar-lyrics-1.4.15.spmod`
+产物：`build/libs/plugin-com.spwtb.spw-taskbar-lyrics-1.5.0.spmod`
 
-首次构建从**腾讯云镜像**下载 Gradle、从**阿里云镜像**拉依赖（见 `settings.gradle.kts`），
-国内网络可直接跑通。打包任务内置校验，会打开最终分发包逐项确认
-Manifest 可解析、`Plugin-Class` 声明的类真的在包里、`extensions.idx` 非空、
-声明有配置界面就带着 `preference_config.json`，任何一项缺失直接构建失败。
+首次构建从**腾讯云镜像**下载 Gradle 9.8.0、从**阿里云 / JitPack** 拉依赖（见 `settings.gradle.kts`），
+国内网络可直接跑通。打包由官方 `com.xuncorp.spw.workshop` Gradle 插件完成：
+生成 `classes/`（展开的 jar）+ `lib/`（运行时依赖），并在 Manifest 写入
+`Plugin-Class` / `Plugin-Permissions` / `Plugin-Open-Source-Url` 等元数据。
 
 | 需要的环境 | 说明 |
 | --- | --- |
-| **JDK 21** | dev20 的 API 是 Java 21 字节码，**不需要 JDK 25**（那是 dev22 的要求） |
-| Salt Player for Windows | 1.18.x / 1.19.x（实测 1.19.2） |
+| **JDK 25** | dev22 的 API 与插件字节码都是 Java 25；Gradle 9.8.0 |
+| Salt Player for Windows | 1.19.x（实测 1.19.2） |
 
-**不需要** .NET、不需要额外运行库——JNA 自带原生库；打包时只保留 Windows 的两个原生目录，`lib/` 里约 424 KB。
+**不需要** .NET、不需要额外运行库——JNA 自带原生库；官方 Workshop 打包会带上完整 JNA（`lib/` 约 2.0 MB），如需 Windows-only 裁剪要另行处理。
 
-> 当前 1.4.15 使用 `0.1.0-dev20`（SPW 1.18.x API）/ Java 21 构建；已在 SPW 1.19.2 上实测可用。
-> 官方当前推荐 dev22/JDK25，迁移计划放到 1.5.0，避免在发布前引入构建风险。
+> 当前 1.5.0 使用官方 dev22 / JDK 25 / Gradle 9.8.0 / 官方 Workshop Gradle 插件构建；
+> 仅支持 SPW 1.19.x（实测 1.19.2），1.18.x 不再保证可用。
 
 ## 安装
 
@@ -176,7 +178,7 @@ Manifest 可解析、`Plugin-Class` 声明的类真的在包里、`extensions.id
 
 **宿主环境**
 
-- SPW 版本 **1.18.5**（历史实测；1.19.2 上插件同样可用），自带 **Java 25**（jlink 裁剪）
+- SPW 版本 **1.19.2**（当前实测；1.5.0 不再支持 1.18.x），自带 **Java 25**（jlink 裁剪）
 - `app/Salt Player for Windows.cfg` 里显式开放了原生调用与 AWT 内部包：
   ```
   --enable-native-access=ALL-UNNAMED
@@ -279,6 +281,7 @@ spw-taskbar-lyrics/
    节奏快的段落会有轻微不同步；整行高亮与逐行滚动是准确的。
 6. **Explorer 重启后**窗口会失效，渲染线程会检测到并自动重建。
 7. **换歌时封面是同步解码的**：大封面可能让换歌那一帧停顿几十毫秒（和 1.4.10 一致，换来的是封面与歌词同帧切换）。原图解码过一次后就只剩缩放，拖动尺寸/圆角/缩放不会再读盘。
+8. **首曲封面需要曲库读取授权**：1.5.0 只申请 `LIBRARY_READ`；授权后启动时用 `getCurrentMediaItem()` 拿回首曲路径，首曲也有封面/内嵌歌词。未授权时首曲仍显示歌词（临时会话），但没有封面。
 
 ## 许可
 

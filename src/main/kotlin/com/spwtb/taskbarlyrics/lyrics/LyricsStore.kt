@@ -3,7 +3,9 @@
 package com.spwtb.taskbarlyrics.lyrics
 
 import com.xuncorp.spw.workshop.api.PlaybackExtensionPoint
+import com.xuncorp.spw.workshop.api.PluginPermission
 import com.xuncorp.spw.workshop.api.UnstableSpwWorkshopApi
+import com.xuncorp.spw.workshop.api.WorkshopApi
 import java.io.File
 import java.security.MessageDigest
 import java.util.TreeMap
@@ -66,6 +68,9 @@ object LyricsStore {
     @Volatile private var positionAtNanosValue: Long = 0L
     @Volatile private var songChangedAtMs: Long = 0L
 
+    /** 上一次位置回调的值，用于判断位置是否真的在前进（补启动时漏掉的 isPlaying=true）。 */
+    @Volatile private var lastPositionMs: Long = -1L
+
     /** 内嵌歌词没拿到时的重试计时/次数（换曲清零）。 */
     @Volatile private var embeddedRetryCount: Int = 0
     @Volatile private var embeddedRetryAtMs: Long = 0L
@@ -91,6 +96,34 @@ object LyricsStore {
             if (ioExecutor.isShutdown) {
                 ioExecutor = newIoExecutor()
             }
+        }
+    }
+
+    /**
+     * 插件启动时补一次「当前歌曲」查询。
+     *
+     * 宿主 1.19 的 `getCurrentMediaItem()` 需要 `LIBRARY_READ`。拿到真实 MediaItem 后，
+     * 首曲也能读内嵌封面/歌词（不再依赖临时会话）。权限未授予或查询失败时静默降级，
+     * 仍由 [onLyricsLinesReplayed] / 行回调的临时会话显示歌词。
+     */
+    fun requestCurrentSong(onReady: () -> Unit = {}) {
+        val executor = ioExecutor
+        try {
+            executor.execute {
+                val item = runCatching {
+                    if (!WorkshopApi.manager.isPermissionGranted(PluginPermission.LIBRARY_READ)) {
+                        null
+                    } else {
+                        WorkshopApi.playback.getCurrentMediaItem()
+                    }
+                }.getOrNull()
+                if (item != null) {
+                    onSongChanged(item)
+                }
+                onReady()
+            }
+        } catch (_: RejectedExecutionException) {
+            // 插件刚好在停用
         }
     }
 
@@ -132,6 +165,7 @@ object LyricsStore {
             }
             songChangedAtMs = System.currentTimeMillis()
             positionMsValue = 0L
+            lastPositionMs = -1L
         }
 
         if (!sameSong) {
@@ -147,28 +181,32 @@ object LyricsStore {
         }
     }
 
-    /** 当前行变化。仅在内嵌解析不可用时才作为兜底数据源。 */
+    /** 当前行变化。内嵌/完整时间轴不可用时作为兜底数据源。 */
     fun onLyricLineUpdated(line: PlaybackExtensionPoint.LyricsLine?) {
         if (line == null) return
         // 已经拿到完整时间轴时，忽略累加数据，避免两种来源混在一起
         if (lyricsOriginValue == LyricsOrigin.EMBEDDED || lyricsOriginValue == LyricsOrigin.SIDECAR) return
 
-        // 宿主给的逐字单元如果是真实数据就用真实的，否则合成
-        val cells = line.lyricsCells.map {
-            LyricCell(it.startTime, it.endTime, it.text)
-        }.ifEmpty {
-            SyllableSynthesizer.synthesize(line.pureMainText, line.startTime, line.endTime)
-        }
-
-        val mapped = LyricLine(
-            startMs = line.startTime,
-            endMs = line.endTime,
-            text = line.pureMainText,
-            translation = line.pureSubText?.takeIf { it.isNotBlank() },
-            cells = cells
-        )
+        val mapped = toLyricLine(line)
 
         synchronized(lock) {
+            // 插件启动晚于首曲的 onBeforeLoadLyrics 时，song 是 null。
+            // 这里补一个临时会话，让当前行和后续行能显示出来；
+            // 宿主 1.19 的 onLyricsLinesUpdated 重放会补上更完整的时间轴。
+            if (songValue == null) {
+                songValue = provisionalSong()
+                songRevisionValue++
+                songChangedAtMs = System.currentTimeMillis()
+                lyricsStateValue = LyricsState.READY
+                lyricsOriginValue = LyricsOrigin.ACCUMULATED
+                lyricsRevisionValue++
+            }
+            // 没有位置回调时，用当前行的开始时间当提示，先把它显示出来
+            if (songValue?.key == PROVISIONAL_KEY && positionAtNanosValue == 0L) {
+                positionMsValue = mapped.startMs
+                positionAtNanosValue = System.nanoTime()
+                lastPositionMs = mapped.startMs
+            }
             if (accumulated[mapped.startMs] != mapped) {
                 accumulated[mapped.startMs] = mapped
                 val lines = accumulated.values.toList()
@@ -179,6 +217,56 @@ object LyricsStore {
                 lyricsRevisionValue++
             }
         }
+    }
+
+    /**
+     * SPW 1.19+ 在插件启动/重新启用后异步重放的完整歌词时间轴。
+     *
+     * 这是「首曲没有歌词」的正解：首曲的 onBeforeLoadLyrics 可能在扩展注册前
+     * 就发生过了，但宿主会把当前完整列表再推一次。此时拿不到 MediaItem，
+     * 先用 [provisionalSong] 建一个临时会话，歌词即可显示（暂无封面）；
+     * 下一次换曲的 onBeforeLoadLyrics 会把它替换成真实歌曲。
+     */
+    fun onLyricsLinesReplayed(lines: List<PlaybackExtensionPoint.LyricsLine>) {
+        if (lines.isEmpty()) return
+        val mapped = lines.map { toLyricLine(it) }
+        synchronized(lock) {
+            val provisional = songValue?.key == PROVISIONAL_KEY
+            // 已经有真实歌曲：不覆盖插件自己的内嵌解析结果
+            if (songValue != null && !provisional) return
+            if (songValue == null) {
+                songValue = provisionalSong()
+                songRevisionValue++
+                songChangedAtMs = System.currentTimeMillis()
+            }
+            accumulated.clear()
+            for (line in mapped) accumulated[line.startMs] = line
+            val timeline = accumulated.values.toList()
+            linesValue = timeline
+            hasTranslationValue = anyTranslation(timeline)
+            lyricsOriginValue = LyricsOrigin.ACCUMULATED
+            lyricsStateValue = LyricsState.READY
+            lyricsRevisionValue++
+        }
+    }
+
+    private fun provisionalSong(): LyricSong =
+        LyricSong(PROVISIONAL_KEY, "", "", "", "")
+
+    /** 把宿主的歌词行转成插件模型；没有字级数据时按字数合成。 */
+    private fun toLyricLine(line: PlaybackExtensionPoint.LyricsLine): LyricLine {
+        val cells = line.lyricsCells.map {
+            LyricCell(it.startTime, it.endTime, it.text)
+        }.ifEmpty {
+            SyllableSynthesizer.synthesize(line.pureMainText, line.startTime, line.endTime)
+        }
+        return LyricLine(
+            startMs = line.startTime,
+            endMs = line.endTime,
+            text = line.pureMainText,
+            translation = line.pureSubText?.takeIf { it.isNotBlank() },
+            cells = cells
+        )
     }
 
     /**
@@ -211,11 +299,26 @@ object LyricsStore {
     }
 
     fun onPositionUpdated(position: Long) {
+        // 插件启动时可能错过 onIsPlayingChanged(true)。位置在推进，说明确实在播放。
+        // 暂停时宿主即使继续回调，位置也是同一个值，不会误判。
+        val advanced = lastPositionMs >= 0 && position != lastPositionMs
+        lastPositionMs = position
+        if (advanced && !playingValue) {
+            playingValue = true
+        }
         positionMsValue = position
         // 顺带兜一次内嵌歌词：没拿到就会停在「累加模式」，第二行永远是空的
         retryEmbeddedIfNeeded()
         // 记下这次的系统时刻：SPW 每秒才回调一次，两次之间要靠外推补出平滑进度
         positionAtNanosValue = System.nanoTime()
+    }
+
+    /**
+     * 跳转。位置会跳变，不能当成「正在播放」的证据，所以先清掉上一次位置。
+     */
+    fun onSeekTo(position: Long) {
+        lastPositionMs = -1L
+        onPositionUpdated(position)
     }
 
     /**
@@ -255,6 +358,7 @@ object LyricsStore {
             positionMsValue = 0L
             positionAtNanosValue = 0L
             songChangedAtMs = 0L
+            lastPositionMs = -1L
             embeddedRetryCount = 0
             embeddedRetryAtMs = 0L
             songRevisionValue++
@@ -410,6 +514,12 @@ object LyricsStore {
     }
 
     private const val PENDING_GRACE_MS = 5000L
+
+    /**
+     * 宿主没有给出 MediaItem 时的临时会话 key（首曲启动竞态）。
+     * 真实歌曲的 key 是路径/元数据的 SHA-256，不会与它撞。
+     */
+    private const val PROVISIONAL_KEY = "provisional-current"
 
     /** 内存里最多留多少首歌的完整时间轴。8 首约等于一张专辑。 */
     private const val MEMORY_CACHE_ENTRIES = 8

@@ -8,8 +8,9 @@ import org.pf4j.Extension
 /**
  * 播放扩展点：把 SPW 的播放事件搬进 [LyricsStore]。
  *
- * 这里只覆写 SPW 1.18.x 真实存在的方法（已用 dev20 的 API jar 逐个核对过）。
- * 特别地，**不要**覆写 `onLyricsLinesUpdated`——那要 SPW 1.19.0，现役版本没有。
+ * 编译目标是官方 dev22（SPW 1.19.x API）。1.19+ 的 `onLyricsLinesUpdated`
+ * 会在插件启动或重新启用后异步重放当前完整歌词——这正是首曲在扩展注册前
+ * 加载完时的补偿入口。
  *
  * 官方约束：
  * - `onBeforeLoadLyrics` / `onAfterLoadLyrics` 在 IO 线程执行，只做状态写入，不做耗时操作。
@@ -27,7 +28,7 @@ class SpwPlaybackExtension : PlaybackExtensionPoint {
         return null
     }
 
-    /** 当前歌词行变化。SPW 1.18.x 上这是唯一的歌词数据来源，需要自行累加。 */
+    /** 当前歌词行变化。1.18.x 上是唯一数据源；1.19+ 还有完整列表重放。 */
     override fun onLyricsLineUpdated(lyricsLine: PlaybackExtensionPoint.LyricsLine?) {
         LyricsStore.onLyricLineUpdated(lyricsLine)
         // 收到回调说明歌词加载流程已经跑起来了，顺手做一次「确实没有歌词」的判定
@@ -53,9 +54,18 @@ class SpwPlaybackExtension : PlaybackExtensionPoint {
         }
     }
 
+    /**
+     * SPW 1.19+ 的完整歌词重放。首曲在扩展注册前就加载完时，靠它补回来。
+     */
+    override fun onLyricsLinesUpdated(lyricsLines: List<PlaybackExtensionPoint.LyricsLine>) {
+        LyricsStore.onLyricsLinesReplayed(lyricsLines)
+        PluginRuntime.wake()
+    }
+
     override fun onSeekTo(position: Long) {
-        // 跳到新位置后立刻刷新，避免渲染器在下一次每秒回调前显示旧行
-        LyricsStore.onPositionUpdated(position)
+        // 跳到新位置后立刻刷新，避免渲染器在下一次每秒回调前显示旧行。
+        // 走 onSeekTo 而不是 onPositionUpdated：seek 不能被当成「正在播放」的证据。
+        LyricsStore.onSeekTo(position)
         PluginRuntime.wake()
     }
 }

@@ -7,6 +7,17 @@ pluginManagement {
         maven("https://jitpack.io")
         gradlePluginPortal()
     }
+    resolutionStrategy {
+        eachPlugin {
+            // JitPack 的多模块发布物 groupId 与 Gradle 默认插件标记坐标不同，
+            // 必须显式映射；版本取自 build.gradle.kts plugins 块里的 requested.version。
+            if (requested.id.id == "com.xuncorp.spw.workshop") {
+                useModule(
+                    "com.github.Moriafly.spw-workshop-api:spw-workshop-gradle-plugin:${requested.version}"
+                )
+            }
+        }
+    }
 }
 
 dependencyResolutionManagement {

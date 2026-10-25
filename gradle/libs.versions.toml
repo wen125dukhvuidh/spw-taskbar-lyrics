@@ -1,8 +1,7 @@
 [versions]
-# 仍对应 SPW 1.18.x API（dev20）；宿主实测 1.19.2 可用。
-# 官方当前推荐 dev22/JDK25，迁移计划见 README（1.5.0）。
-# dev21 / dev22 依赖尚未发布的 SPW 1.19.0，不要升上来。
-spw-workshop-api = "0.1.0-dev20"
+# 官方 dev22 / JDK 25；宿主 SPW 1.19.x（实测 1.19.2）。
+# 插件使用 1.19 的 onLyricsLinesUpdated / getCurrentMediaItem，并声明 LIBRARY_READ。
+spw-workshop-api = "0.1.0-dev22"
 kotlin = "2.4.20"
 
 [libraries]

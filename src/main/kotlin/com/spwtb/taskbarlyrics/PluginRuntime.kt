@@ -95,6 +95,9 @@ object PluginRuntime {
         }
 
         renderer.start()
+        // 1.19：用 LIBRARY_READ 补一次当前歌曲，拿回首曲的真实路径/封面。
+        // 权限未授予时静默降级，仍会显示临时会话的歌词。
+        LyricsStore.requestCurrentSong { renderer.wake() }
         if (notify) {
             WorkshopApi.ui.toast("任务栏歌词已启动", WorkshopApi.Ui.ToastType.Success)
         }
