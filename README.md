@@ -1,5 +1,7 @@
 # SPW Taskbar Lyrics
 
+![任务栏歌词 · Taskbar Lyrics](docs/cover.png)
+
 把歌词显示到 Windows 任务栏上的 Salt Player for Windows 插件。
 
 **插件自己取歌词、自己画到任务栏，不依赖任何外部程序。**
