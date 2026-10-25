@@ -1,0 +1,313 @@
+{
+  "configs": [
+    {
+      "title": "通用",
+      "config": "general.json",
+      "preferences": [
+        {
+          "type": "list",
+          "key": "general.anchor",
+          "title": "显示位置",
+          "entries": [
+            "左侧",
+            "居中",
+            "右侧"
+          ],
+          "entry_values": [
+            "left",
+            "center",
+            "right"
+          ],
+          "default_value": "center"
+        },
+        {
+          "type": "switch",
+          "key": "general.autoHideWhenNoPlayback",
+          "title": "无播放时隐藏",
+          "summary": "暂停或没有歌词时完全不占任务栏",
+          "default_value": true
+        },
+        {
+          "type": "seekbar",
+          "key": "general.xOffset",
+          "title": "水平微调（像素）",
+          "default_value": 0,
+          "min": -400,
+          "max": 400
+        },
+        {
+          "type": "seekbar",
+          "key": "general.yOffset",
+          "title": "垂直微调（像素）",
+          "default_value": 0,
+          "min": -200,
+          "max": 200
+        },
+        {
+          "type": "button",
+          "title": "重启任务栏歌词",
+          "summary": "强制重建窗口，用于排查显示异常",
+          "arrow_type": "arrow",
+          "on_click": "com.spwtb.taskbarlyrics.actions.PluginActions.restartRenderer"
+        },
+        {
+          "type": "button",
+          "title": "显示当前状态",
+          "summary": "提示显示位置、字号与歌词来源",
+          "arrow_type": "none",
+          "on_click": "com.spwtb.taskbarlyrics.actions.PluginActions.showStatus"
+        },
+        {
+          "type": "button",
+          "title": "还原默认设置",
+          "summary": "把五组设置写回默认值；还原后请关闭本页再打开（本页继续调整会把旧值写回）",
+          "arrow_type": "none",
+          "on_click": "com.spwtb.taskbarlyrics.actions.PluginActions.resetToDefaults"
+        }
+      ]
+    },
+    {
+      "title": "显示",
+      "config": "display.json",
+      "preferences": [
+        {
+          "type": "seekbar",
+          "key": "display.widthPercent",
+          "title": "宽度占比（%）",
+          "default_value": 100,
+          "min": 20,
+          "max": 100
+        },
+        {
+          "type": "seekbar",
+          "key": "display.fixedWidth",
+          "title": "固定宽度（逻辑像素，0=按占比）",
+          "default_value": 0,
+          "min": 0,
+          "max": 1400
+        },
+        {
+          "type": "seekbar",
+          "key": "display.layoutScalePercent",
+          "title": "整体缩放（%）",
+          "default_value": 100,
+          "min": 25,
+          "max": 300
+        },
+        {
+          "type": "list",
+          "key": "display.secondLine",
+          "title": "第二行",
+          "summary": "自动：本句有翻译显示翻译；整首有翻译但本句没有显示「…」；整首没有翻译显示下一句",
+          "entries": [
+            "不显示",
+            "显示下一句",
+            "显示翻译",
+            "自动"
+          ],
+          "entry_values": [
+            "none",
+            "next",
+            "translation",
+            "auto"
+          ],
+          "default_value": "auto"
+        }
+      ]
+    },
+    {
+      "title": "排版",
+      "config": "typography.json",
+      "preferences": [
+        {
+          "type": "edittext",
+          "key": "typography.fontFamily",
+          "title": "字体",
+          "summary": "原版默认使用思源黑体 Source Han Sans SC；找不到会自动回退到雅黑",
+          "default_value": "Source Han Sans SC"
+        },
+        {
+          "type": "seekbar",
+          "key": "typography.fontSize",
+          "title": "字号",
+          "default_value": 14,
+          "min": 6,
+          "max": 96
+        },
+        {
+          "type": "switch",
+          "key": "typography.bold",
+          "title": "加粗",
+          "summary": "任务栏背景通常较杂，加粗可读性更好；切换后即时生效，若播放器未刷新可重启客户端",
+          "default_value": true
+        },
+        {
+          "type": "seekbar",
+          "key": "typography.textGammaPercent",
+          "title": "笔画粗细补偿（%）",
+          "summary": "Java2D 的文字抗锯齿比浏览器偏细：100=不补偿，130=与原版一致（默认），调小更细、调大更粗",
+          "default_value": 130,
+          "min": 100,
+          "max": 260
+        },
+        {
+          "type": "list",
+          "key": "typography.textAlign",
+          "title": "文本对齐",
+          "summary": "原版默认左对齐（文字紧跟封面）",
+          "entries": [
+            "靠左",
+            "居中",
+            "靠右"
+          ],
+          "entry_values": [
+            "left",
+            "center",
+            "right"
+          ],
+          "default_value": "left"
+        },
+        {
+          "type": "switch",
+          "key": "typography.wordScanning",
+          "title": "逐字扫描",
+          "summary": "已唱到的字用亮色。内嵌歌词没有字级时间时按字数均分估算",
+          "default_value": true
+        },
+        {
+          "type": "seekbar",
+          "key": "typography.lyricOffsetMs",
+          "title": "歌词偏移（毫秒）",
+          "default_value": 0,
+          "min": -5000,
+          "max": 5000
+        }
+      ]
+    },
+    {
+      "title": "外观",
+      "config": "appearance.json",
+      "preferences": [
+        {
+          "type": "list",
+          "key": "appearance.foregroundMode",
+          "title": "文字颜色",
+          "summary": "跟随系统会读 Windows 的浅色/深色主题设置",
+          "entries": [
+            "跟随系统",
+            "浅色文字",
+            "深色文字",
+            "自定义"
+          ],
+          "entry_values": [
+            "system",
+            "light",
+            "dark",
+            "custom"
+          ],
+          "default_value": "system"
+        },
+        {
+          "type": "edittext",
+          "key": "appearance.foregroundColor",
+          "title": "自定义文字颜色",
+          "summary": "仅文字颜色选择自定义时生效",
+          "default_value": "#FFFFFF"
+        },
+        {
+          "type": "switch",
+          "key": "appearance.showBackground",
+          "title": "显示背景",
+          "summary": "原版默认不画背景，歌词直接浮在任务栏上；任务栏较花时可打开",
+          "default_value": false
+        },
+        {
+          "type": "seekbar",
+          "key": "appearance.backgroundOpacity",
+          "title": "背景不透明度（%）",
+          "default_value": 55,
+          "min": 0,
+          "max": 100
+        },
+        {
+          "type": "edittext",
+          "key": "appearance.backgroundColor",
+          "title": "背景颜色",
+          "summary": "#RRGGBB 或 #AARRGGBB",
+          "default_value": "#121218"
+        },
+        {
+          "type": "switch",
+          "key": "appearance.showBorder",
+          "title": "显示边框",
+          "default_value": false
+        },
+        {
+          "type": "switch",
+          "key": "appearance.showTextShadow",
+          "title": "文字阴影",
+          "default_value": true
+        },
+        {
+          "type": "seekbar",
+          "key": "appearance.cornerRadius",
+          "title": "背景圆角（半径像素）",
+          "default_value": 8,
+          "min": 0,
+          "max": 40
+        }
+      ]
+    },
+    {
+      "title": "封面",
+      "config": "cover.json",
+      "preferences": [
+        {
+          "type": "switch",
+          "key": "cover.show",
+          "title": "显示封面",
+          "summary": "从音频文件的内嵌图片读取",
+          "default_value": true
+        },
+        {
+          "type": "seekbar",
+          "key": "cover.size",
+          "title": "封面尺寸（像素）",
+          "default_value": 34,
+          "min": 12,
+          "max": 200
+        },
+        {
+          "type": "seekbar",
+          "key": "cover.gap",
+          "title": "封面与歌词间距",
+          "default_value": 8,
+          "min": 0,
+          "max": 240
+        },
+        {
+          "type": "seekbar",
+          "key": "cover.cornerRadius",
+          "title": "封面圆角（半径像素）",
+          "default_value": 6,
+          "min": 0,
+          "max": 60
+        },
+        {
+          "type": "list",
+          "key": "cover.position",
+          "title": "封面位置",
+          "entries": [
+            "左侧",
+            "右侧"
+          ],
+          "entry_values": [
+            "left",
+            "right"
+          ],
+          "default_value": "left"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+build/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Local / OS
+local.properties
+.DS_Store
+Thumbs.db
+*.log
+
+# Probe output
+tools/probe/out/
+*.class
