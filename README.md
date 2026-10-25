@@ -7,7 +7,9 @@
 **插件自己取歌词、自己画到任务栏，不依赖任何外部程序。**
 装完之后就不再需要额外的任务栏歌词工具了。
 
-**下载**：[GitHub Releases](https://github.com/wen125dukhvuidh/spw-taskbar-lyrics/releases)
+**下载**：
+- [Steam 创意工坊](https://steamcommunity.com/sharedfiles/filedetails/?id=3826973783)
+- [GitHub Releases](https://github.com/wen125dukhvuidh/spw-taskbar-lyrics/releases)
 
 > 本插件的任务栏嵌入方案、设置体系与歌词视觉参数参考/复刻自
 > [ANYNC/TaskbarLyrics](https://github.com/ANYNC/TaskbarLyrics)（MIT）。
@@ -105,9 +107,16 @@ Manifest 可解析、`Plugin-Class` 声明的类真的在包里、`extensions.id
 
 ## 安装
 
+**Steam 用户**：在 [Steam 创意工坊](https://steamcommunity.com/sharedfiles/filedetails/?id=3826973783) 订阅，
+然后在播放器的 **创意工坊 → 模组管理** 里启用。
+
+**本地导入**：
+
 1. Salt Player → 设置 → 创意工坊 → 模组管理 → 导入上面那个 `.spmod`（`.zip` 也收）→ 启用
 2. 首次启用需要**重启播放器**
 3. 之后播放带内嵌歌词的音乐，歌词会直接出现在任务栏上
+
+> 同一个插件 ID 不要同时用 Steam 订阅和本地导入：会来源冲突，播放器可能把两者都停用。
 
 ## 配置项
 
