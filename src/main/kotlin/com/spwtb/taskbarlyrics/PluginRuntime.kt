@@ -94,6 +94,7 @@ object PluginRuntime {
             return false
         }
 
+        CoverArt.start { renderer.wake() }
         renderer.start()
         // 1.19：用 LIBRARY_READ 补一次当前歌曲，拿回首曲的真实路径/封面。
         // 权限未授予时静默降级，仍会显示临时会话的歌词。

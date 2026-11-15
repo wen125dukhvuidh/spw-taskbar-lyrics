@@ -28,7 +28,7 @@ data class RenderSettings(
     /** 在任务栏空闲区里的水平锚点。 */
     val anchor: TaskbarAnchor = TaskbarAnchor.CENTER,
 
-    /** 无播放（或没有歌词）时隐藏，不占任务栏。 */
+    /** 暂停时隐藏；前奏、加载中及无歌词时仍显示歌曲信息。 */
     val autoHideWhenNoPlayback: Boolean = true,
 
     /**

@@ -69,7 +69,7 @@ object LyricLineSelector {
         mode: SecondLineMode,
         trackHasTranslation: Boolean = lines.any { !it.translation.isNullOrBlank() }
     ): LyricSelection? {
-        if (lines.isEmpty()) {
+        if (lines.isEmpty() || positionMs < lines.first().startMs) {
             return null
         }
 

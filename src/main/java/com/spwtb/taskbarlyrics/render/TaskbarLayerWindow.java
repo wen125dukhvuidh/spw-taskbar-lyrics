@@ -42,6 +42,7 @@ public final class TaskbarLayerWindow {
     private Pointer screenDc;
     private Pointer memDc;
     private Pointer dib;
+    private Pointer originalBitmap;
     private Pointer dibBits;
 
     private byte[] scratch;
@@ -124,11 +125,11 @@ public final class TaskbarLayerWindow {
         if (hwnd == null) {
             return false;
         }
-        // 1px 以内的抖动直接忽略。
+        // 仅位置允许忽略 1px 抖动，尺寸必须与上层画布严格一致。
         // 任务栏上的托盘时钟、网速浮窗宽度会随时间变化，算出来的位置每 500ms
         // 就会漂几像素。跟着漂有两个代价：1) 尺寸变了要重建 DIB（贵）；
         // 2) 画面会持续抖。肉眼无感的移动，不值得动窗口。
-        boolean sizeChanged = Math.abs(newWidth - width) > 1 || Math.abs(newHeight - height) > 1;
+        boolean sizeChanged = newWidth != width || newHeight != height;
         boolean moved = Math.abs(newX - x) > 1 || Math.abs(newY - y) > 1;
         if (!sizeChanged && !moved) {
             return false;
@@ -175,7 +176,10 @@ public final class TaskbarLayerWindow {
             destroy();
             throw new IllegalStateException("CreateDIBSection 失败，err=" + Native.getLastError());
         }
-        Win32.G.SelectObject(memDc, newDib);
+        Pointer previous = Win32.G.SelectObject(memDc, newDib);
+        if (originalBitmap == null) {
+            originalBitmap = previous;
+        }
         dib = newDib;
         dibBits = bitsRef.getValue();
         scratch = new byte[surfaceWidth * surfaceHeight * 4];
@@ -188,16 +192,11 @@ public final class TaskbarLayerWindow {
 
     private void resizeSurface(int surfaceWidth, int surfaceHeight) {
         Pointer oldDib = dib;
-        // 被选入 DC 的位图删不掉：先把一个 1×1 的替身选进去，把旧图换出来
-        Pointer stub = Win32.G.CreateCompatibleBitmap(screenDc, 1, 1);
-        Win32.G.SelectObject(memDc, stub);
+        // 先创建并选入新图，旧图换出后才能释放；分配失败时仍可清理旧图。
+        createSurface(surfaceWidth, surfaceHeight);
         if (oldDib != null) {
             Win32.G.DeleteObject(oldDib);
         }
-        dib = null;
-        // createSurface 会把新 DIB 选进同一个 DC，替身随之换出
-        createSurface(surfaceWidth, surfaceHeight);
-        Win32.G.DeleteObject(stub);
         width = surfaceWidth;
         height = surfaceHeight;
     }
@@ -325,6 +324,10 @@ public final class TaskbarLayerWindow {
             hwnd = null;
         }
         if (dib != null) {
+            // 选入 DC 的位图不能直接删除，否则每次重建窗口都会泄漏 GDI 资源。
+            if (memDc != null && originalBitmap != null) {
+                Win32.G.SelectObject(memDc, originalBitmap);
+            }
             Win32.G.DeleteObject(dib);
             dib = null;
         }
@@ -332,6 +335,7 @@ public final class TaskbarLayerWindow {
             Win32.G.DeleteDC(memDc);
             memDc = null;
         }
+        originalBitmap = null;
         if (screenDc != null) {
             Win32.U.ReleaseDC(null, screenDc);
             screenDc = null;

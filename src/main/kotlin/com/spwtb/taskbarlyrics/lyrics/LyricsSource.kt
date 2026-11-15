@@ -377,11 +377,19 @@ object LrcParser {
             val trimmed = line.trim()
             if (trimmed.isEmpty()) continue
 
-            val tags = TIME_TAG.findAll(trimmed).toList()
-            if (tags.isEmpty()) continue
+            // 只有正文前连续出现的标签才是行起点（多个起点表示重复歌词）。
+            // LDDC 会输出 [开始]正文[结束]；不能把结束标签后的空串当成正文。
+            val startTags = ArrayList<MatchResult>()
+            var textStart = 0
+            for (tag in TIME_TAG.findAll(trimmed)) {
+                if (trimmed.substring(textStart, tag.range.first).isNotBlank()) break
+                startTags.add(tag)
+                textStart = tag.range.last + 1
+            }
+            if (startTags.isEmpty()) continue
 
-            var text = trimmed.substring(tags.last().range.last + 1)
-            text = text.trim()
+            // 行尾结束标签和正文中的逐字标签都不属于文字，也不是重复的行起点。
+            var text = TIME_TAG.replace(trimmed.substring(textStart), "").trim()
             // 形如 [00:01.00] 后面还跟着元信息标签的，去掉
             if (META_TAG.containsMatchIn(text)) {
                 text = text.replace(META_TAG, "").trim()
@@ -392,7 +400,7 @@ object LrcParser {
             // 否则渲染器在投影歌词时会异常。
             if (text.isEmpty()) continue
 
-            for (tag in tags) {
+            for (tag in startTags) {
                 val ms = toMillis(tag) + offsetMs
                 if (ms >= 0) {
                     staged.add(ms to text)

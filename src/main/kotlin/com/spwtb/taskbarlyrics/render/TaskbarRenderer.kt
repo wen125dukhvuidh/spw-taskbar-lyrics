@@ -13,8 +13,6 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.math.roundToInt
 
-/** `buildFrame` 的结果：这一帧的内容 + 它的身份（用来判断要不要起过渡）。 */
-private data class FrameUpdate(val frame: LyricsFrame?, val key: String?)
 
 /**
  * 任务栏歌词渲染器：**全部在插件进程内完成，不依赖任何外部程序**。
@@ -299,10 +297,10 @@ class TaskbarRenderer(private val settingsProvider: () -> RenderSettings) {
                     continue
                 }
                 // 目前只处理主任务栏；多屏支持是后续工作
-                val taskbar = taskbars[0]
+                var taskbar = taskbars[0]
                 val handle = Pointer.nativeValue(taskbar.hwnd)
-                val taskbarHeight = taskbar.height()
-                val dpiScale = taskbar.dpi / 96.0
+                var taskbarHeight = taskbar.height()
+                var dpiScale = taskbar.dpi / 96.0
                 lastDpiScale = dpiScale
 
                 // 回到外层说明刚换过任务栏（Explorer 重启之类），
@@ -390,7 +388,15 @@ class TaskbarRenderer(private val settingsProvider: () -> RenderSettings) {
                     val key = current.geometryKey(handle, taskbar.dpi, taskbarHeight)
                     if (key != geometryKey || due) {
                         lastScanAt = nowMs
-                        geometryKey = key
+                        // 不能一直沿用建窗时的矩形和 DPI：任务栏可移动、缩放或变高。
+                        val refreshed = Win32.findTaskbars().firstOrNull {
+                            Pointer.nativeValue(it.hwnd) == handle
+                        } ?: break
+                        taskbar = refreshed
+                        taskbarHeight = taskbar.height()
+                        dpiScale = taskbar.dpi / 96.0
+                        lastDpiScale = dpiScale
+                        geometryKey = current.geometryKey(handle, taskbar.dpi, taskbarHeight)
                         val g = Geometry.of(taskbar, current, slotChooser)
                         if (g == null) {
                             // 暂时没有空闲区：画面保持原样，等下次重扫就好，
@@ -529,47 +535,19 @@ class TaskbarRenderer(private val settingsProvider: () -> RenderSettings) {
      * `PROGRESS_PATCH`，不做动画）。
      */
     private fun buildFrame(s: RenderSettings, dpiScale: Double, windowHeight: Int): FrameUpdate {
-        val song = LyricsStore.song ?: return FrameUpdate(null, null)
-        val lines = LyricsStore.lines
-        if (lines.isEmpty()) {
-            return FrameUpdate(null, null)
+        val song = LyricsStore.song
+        return FrameComposer.compose(
+            song, LyricsStore.lines, LyricsStore.hasTranslation, LyricsStore.lyricsState,
+            LyricsStore.playing, LyricsStore.estimatedPositionMs() + s.lyricOffsetMs, s
+        ) {
+            if (song == null) null else {
+                val layout = LyricsLayout.scale(dpiScale, s)
+                val boxHeight = LyricsLayout.boxHeight(windowHeight, layout)
+                val target = LyricsLayout.coverSizePx(s, layout, boxHeight)
+                val radius = LyricsLayout.coverRadiusPx(s, layout)
+                CoverArt.forSong(song.key, song.path, target, radius)
+            }
         }
-        if (s.autoHideWhenNoPlayback && !LyricsStore.playing) {
-            return FrameUpdate(null, null)
-        }
-
-        val position = LyricsStore.estimatedPositionMs() + s.lyricOffsetMs
-        // 选行逻辑抽在 LyricLineSelector 里，这样探针能把「解析 → 选行 → 绘制」
-        // 这条真实链路整条跑通来验证，而不是只看解析结果。
-        val selection = LyricLineSelector.pick(
-            lines, position, s.secondLine, LyricsStore.hasTranslation
-        ) ?: return FrameUpdate(null, null)
-        val line = lines[selection.index]
-
-        val cover = if (s.showCover) {
-            // 用与绘制端完全相同的公式算目标像素，保证贴图是 1:1。
-            // 这里多算错 1 像素，drawImage 就会多做一次隐式缩放，封面立刻发虚。
-            val layout = LyricsLayout.scale(dpiScale, s)
-            val boxHeight = LyricsLayout.boxHeight(windowHeight, layout)
-            val target = LyricsLayout.coverSizePx(s, layout, boxHeight)
-            val radius = LyricsLayout.coverRadiusPx(s, layout)
-            // 同步解码：保证换歌后第一帧歌词和封面一起切换
-            CoverArt.forSong(song.key, song.path, target, radius)
-        } else {
-            null
-        }
-
-        val frame = LyricsFrame(
-            mainText = selection.mainText,
-            secondText = selection.secondText,
-            cover = cover,
-            cells = line.cells,
-            positionMs = position,
-            lineStartMs = line.startMs,
-            lineEndMs = line.endMs,
-            secondKind = selection.secondKind
-        )
-        return FrameUpdate(frame, "${song.key}#${selection.index}#${selection.mainText}")
     }
 
     /**

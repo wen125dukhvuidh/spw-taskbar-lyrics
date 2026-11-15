@@ -88,4 +88,26 @@ class LrcParserTest {
         assertEquals("作曲：某人 编曲：某人", lines[3].text)
         assertNull(lines[3].translation)
     }
+    @Test
+    fun `keeps lyrics between a start and trailing end timestamp`() {
+        val lines = LrcParser.parse("[00:01.000]第一句[00:02.500]\n[00:03.000]第二句[00:04.000]\n[00:05.000]尾句")
+        assertEquals(listOf(1000L, 3000L, 5000L), lines.map { it.startMs })
+        assertEquals(listOf("第一句", "第二句", "尾句"), lines.map { it.text })
+        assertEquals(3, lines.size, "行尾的结束时间不能产生新的歌词行")
+    }
+
+    @Test
+    fun `repeated leading timestamps still expand when an end timestamp follows text`() {
+        val lines = LrcParser.parse("[00:01.000][00:03.000]副歌[00:04.000]")
+        assertEquals(listOf(1000L, 3000L), lines.map { it.startMs })
+        assertEquals(listOf("副歌", "副歌"), lines.map { it.text })
+    }
+
+    @Test
+    fun `preserves words separated by inline timestamps`() {
+        val lines = LrcParser.parse("[00:01.000]第一[00:01.500]句[00:02.000]")
+        assertEquals(1, lines.size)
+        assertEquals(1000L, lines.single().startMs)
+        assertEquals("第一句", lines.single().text)
+    }
 }

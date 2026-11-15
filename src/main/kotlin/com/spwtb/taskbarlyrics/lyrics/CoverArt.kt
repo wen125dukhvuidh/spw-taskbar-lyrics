@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.RandomAccessFile
 import javax.imageio.ImageIO
+import javax.imageio.stream.MemoryCacheImageInputStream
 
 /**
  * 内嵌封面读取。
@@ -20,9 +21,6 @@ import javax.imageio.ImageIO
 object CoverArt {
 
     private const val MAX_ENTRIES = 8
-
-    /** 原图缓存条数：当前歌 + 上一首，够覆盖连续切歌。 */
-    private const val SOURCE_ENTRIES = 2
 
     /**
      * 原图长边上限（像素）。
@@ -41,29 +39,20 @@ object CoverArt {
             size > MAX_ENTRIES
     }
 
-    /**
-     * 已解码、已居中裁成正方形的原图。
-     *
-     * 键只到歌曲，不含尺寸——所以拖「封面尺寸 / 圆角 / 整体缩放」时，
-     * 只是从这张图重新缩放，不必再打开音频文件、重新解码。
-     * 值为 null 表示这首歌确实没有内嵌封面；同样要缓存，否则每一帧都会重新尝试。
-     */
-    private val sources = object : LinkedHashMap<String, BufferedImage?>(2, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BufferedImage?>?): Boolean =
-            size > SOURCE_ENTRIES
-    }
+    private val sources = AsyncCoverSource({ path -> decodeSource(File(path)) })
+
+    fun start(onReady: () -> Unit = {}) = sources.start(onReady)
 
     /**
      * 取已缩放到 [targetSize]、且圆角已烘焙好的封面；没有则返回 null。
      *
      * [cornerRadius] 是**半径**（像素）。圆角在这里烘焙进位图，而不是绘制时用 clip 裁——
      * 原因：Java2D 的 `Graphics2D.clip` 对非矩形形状**不做抗锯齿**，
-     * 裁出来的角是硬边、发毛。用 `AlphaComposite.DstIn` 乘一张抗锯齿蒙版才是光滑的。
+     * 裁出来的角是硬边、发毛。这里用逐像素覆盖率生成平滑边缘。
      * 而且烘焙后绘制端只要 1:1 贴图，每帧也省了一次合成。
      *
-     * **第一次遇到一首歌时同步读盘 + 解码**：这样换歌后的第一帧歌词和封面是
-     * 同一帧切换的（1.4.10 的观感）。原图缓存在 [sources] 里，之后拖动
-     * 「封面尺寸 / 圆角 / 整体缩放」只是从内存原图重新缩放，不会重读文件。
+     * 首次读取由后台线程完成，歌词和窗口消息泵继续运行；完成后唤醒绘图。
+     * 未就绪或读取失败的结果不写入尺寸缓存，之后可自动补回封面。
      */
     fun forSong(
         songKey: String,
@@ -72,36 +61,25 @@ object CoverArt {
         cornerRadius: Int
     ): BufferedImage? {
         if (path.isBlank() || targetSize <= 0) return null
-        val key = "$songKey@$targetSize@$cornerRadius"
+        val key = "$songKey@$path@$targetSize@$cornerRadius"
         synchronized(lock) {
             if (cache.containsKey(key)) return cache[key]
 
-            val source = if (sources.containsKey(songKey)) {
-                sources[songKey]
-            } else {
-                // 第一次遇到这首歌：同步解码一次。之后尺寸/圆角变化都从这张原图缩放。
-                val decoded = runCatching { decodeSource(File(path)) }.getOrNull()
-                sources[songKey] = decoded
-                decoded
-            }
-            if (source == null) {
-                cache[key] = null
-                return null
-            }
+            val source = sources.get(path) ?: return null
             // 缩放/磨角理论上也可能异常（超大图 OOM 等）：兜住，
             // 最坏是这首歌暂时没有封面，不能让渲染线程跟着挂掉。
             val scaled = runCatching {
                 roundCorners(scaleSquare(source, targetSize), cornerRadius)
             }.getOrNull()
-            cache[key] = scaled
+            if (scaled != null) cache[key] = scaled
             return scaled
         }
     }
 
     fun clear() {
+        sources.clear()
         synchronized(lock) {
             cache.clear()
-            sources.clear()
         }
     }
 
@@ -109,7 +87,18 @@ object CoverArt {
     private fun decodeSource(file: File): BufferedImage? {
         if (!file.isFile) return null
         val bytes = readEmbeddedPicture(file) ?: return null
-        val raw = ImageIO.read(ByteArrayInputStream(bytes)) ?: return null
+        val raw = MemoryCacheImageInputStream(ByteArrayInputStream(bytes)).use { input ->
+            val readers = ImageIO.getImageReaders(input)
+            if (!readers.hasNext()) return null
+            val reader = readers.next()
+            try {
+                reader.input = input
+                reader.read(0)
+            } finally {
+                reader.dispose()
+            }
+        }
+            ?: return null
         val side = minOf(minOf(raw.width, raw.height), MAX_SOURCE_SIDE).coerceAtLeast(1)
         return scaleSquare(raw, side)
     }
@@ -313,10 +302,11 @@ object CoverArt {
 
     // ── 容器解析 ────────────────────────────────────────────────────────
 
-    /** 读内嵌图片的原始字节。支持 FLAC PICTURE 块与 MP3 的 ID3v2 APIC。 */
+    /** 读内嵌图片的原始字节。支持 FLAC PICTURE、MP3 ID3v2 APIC 及 WAV 的 ID3 区块。 */
     fun readEmbeddedPicture(file: File): ByteArray? = when (file.extension.lowercase()) {
         "flac" -> fromFlac(file)
         "mp3" -> fromId3(file)
+        "wav" -> fromWav(file)
         else -> null
     }
 
@@ -372,36 +362,58 @@ object CoverArt {
         return block.copyOfRange(p, p + dataLen)
     }
 
-    /** MP3：读 ID3v2 帧，找 APIC。 */
-    private fun fromId3(file: File): ByteArray? {
-        RandomAccessFile(file, "r").use { raf ->
-            val head = readFully(raf, 10) ?: return null
-            if (head[0] != 'I'.code.toByte() ||
-                head[1] != 'D'.code.toByte() ||
-                head[2] != '3'.code.toByte()
-            ) {
-                return null
-            }
-            val version = head[3].toInt() and 0xFF
-            val size = syncSafe(head, 6)
-            if (size <= 0) return null
-            val body = readFully(raf, size) ?: return null
-            var p = 0
-            while (p + 10 <= body.size) {
-                val id = String(body, p, 4, Charsets.ISO_8859_1)
-                if (id[0] == '\u0000') break
-                // v2.4 帧长是 syncsafe，v2.3 是普通大端
-                val frameSize = if (version >= 4) syncSafe(body, p + 4) else readU32(body, p + 4)
-                val dataStart = p + 10
-                if (frameSize <= 0 || dataStart + frameSize > body.size) break
-                if (id == "APIC") {
-                    return parseApic(body, dataStart, frameSize)
-                }
-                p = dataStart + frameSize
-            }
-            return null
+    /** MP3：文件开头就是 ID3 标签。WAV 则从 RIFF 的 ID3 区块读取同一格式。 */
+    private fun fromId3(file: File): ByteArray? =
+        RandomAccessFile(file, "r").use { raf -> readId3(raf, raf.length()) }
+
+    private fun readId3(raf: RandomAccessFile, end: Long): ByteArray? {
+        if (end - raf.filePointer < 10) return null
+        val head = readFully(raf, 10) ?: return null
+        if (String(head, 0, 3, Charsets.ISO_8859_1) != "ID3") return null
+        val version = head[3].toInt() and 0xFF
+        val size = syncSafe(head, 6)
+        if (size <= 0 || size.toLong() > end - raf.filePointer) return null
+        val body = readFully(raf, size) ?: return null
+        var p = 0
+        while (p + 10 <= body.size) {
+            val id = String(body, p, 4, Charsets.ISO_8859_1)
+            if (id[0] == '\u0000') break
+            val frameSize = if (version >= 4) syncSafe(body, p + 4) else readU32(body, p + 4)
+            val dataStart = p + 10
+            if (frameSize <= 0 || frameSize > body.size - dataStart) break
+            if (id == "APIC") return parseApic(body, dataStart, frameSize)
+            p = dataStart + frameSize
         }
+        return null
     }
+
+    /** WAV：按 RIFF 区块边界跳过音频数据，处理奇数字节区块的填充。 */
+    private fun fromWav(file: File): ByteArray? {
+        RandomAccessFile(file, "r").use { raf ->
+            val head = readFully(raf, 12) ?: return null
+            if (String(head, 0, 4, Charsets.ISO_8859_1) != "RIFF" ||
+                String(head, 8, 4, Charsets.ISO_8859_1) != "WAVE") return null
+            val riffEnd = minOf(raf.length(), 8L + readU32Le(head, 4))
+            while (riffEnd - raf.filePointer >= 8) {
+                val chunk = readFully(raf, 8) ?: return null
+                val length = readU32Le(chunk, 4)
+                if (length > riffEnd - raf.filePointer) return null
+                val dataEnd = raf.filePointer + length
+                val id = String(chunk, 0, 4, Charsets.ISO_8859_1)
+                if (id.equals("id3 ", ignoreCase = true)) {
+                    readId3(raf, dataEnd)?.let { return it }
+                }
+                raf.seek(dataEnd + (length and 1L))
+            }
+        }
+        return null
+    }
+
+    private fun readU32Le(data: ByteArray, offset: Int): Long =
+        (data[offset].toLong() and 0xFF) or
+            ((data[offset + 1].toLong() and 0xFF) shl 8) or
+            ((data[offset + 2].toLong() and 0xFF) shl 16) or
+            ((data[offset + 3].toLong() and 0xFF) shl 24)
 
     /**
      * APIC：编码(1) + MIME(latin1, NUL 结尾) + 图片类型(1) + 描述(按编码决定结尾) + 图片数据。
